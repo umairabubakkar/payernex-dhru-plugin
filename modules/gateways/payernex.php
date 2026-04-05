@@ -29,11 +29,18 @@ function payernex_config()
             'Value' => 'PayerNex',
         ),
         'payernexAPIKey' => array(
-            'Name' => 'API Key',
+            'Name' => 'Merchant Token',
             'Type' => 'text',
             'Size' => '65',
             'Default' => '',
-            'Description' => 'Enter your PayerNex API Key. Sign up at payernex.com and get it from Dashboard > Developer > API Keys.',
+            'Description' => 'Enter your PayerNex Merchant Token. Get it from payernex.com > Dashboard > Developer > API Keys.',
+        ),
+        'payernexWebhookSecret' => array(
+            'Name' => 'Webhook Secret',
+            'Type' => 'text',
+            'Size' => '65',
+            'Default' => '',
+            'Description' => 'Enter your PayerNex Webhook Secret. Get it from payernex.com > Dashboard > Developer > API Keys.',
         ),
         'notes' => array(
             'Type' => 'System',
@@ -47,7 +54,7 @@ function payernex_config()
                         <code style="background: #e8f5e9; padding: 6px 12px; border-radius: 4px; display: inline-block; margin-top: 4px; color: #2e7d32; font-size: 13px; border: 1px solid #c8e6c9;">' . $config['site_address'] . 'modules/gateways/callback/payernex.php</code>
                     </div>
                     <div style="color: #888; font-size: 12px;">
-                        ✅ No additional setup needed — just enter your API Key above and save.<br />
+                        ✅ Enter your Merchant Token and Webhook Secret from PayerNex Dashboard > Developer > API Keys.<br />
                         ✅ Webhook URL is auto-configured. Payments will be credited automatically.
                     </div>
                 </div>

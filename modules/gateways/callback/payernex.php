@@ -30,6 +30,7 @@ define('PAYERNEX_API_URL', 'https://payernex.com');
 // Load gateway parameters
 $GATEWAY = loadGatewayModule('payernex');
 $apiKey = trim($GATEWAY['payernexAPIKey']);
+$webhookSecret = trim($GATEWAY['payernexWebhookSecret']);
 
 // Read incoming webhook payload
 $rawPayload = file_get_contents('php://input');
@@ -42,9 +43,21 @@ if (!$GETDATA) {
 }
 
 // ─────────────────────────────────────────────
-// Verify payment by checking order status via PayerNex API
-// This is more reliable than signature verification alone —
-// we confirm directly with PayerNex that the order is actually paid
+// Step 1: Verify HMAC-SHA256 signature (if webhook secret is configured)
+// ─────────────────────────────────────────────
+if (!empty($webhookSecret)) {
+    $receivedSignature = isset($_SERVER['HTTP_X_SIGNATURE']) ? $_SERVER['HTTP_X_SIGNATURE'] : '';
+    $expectedSignature = hash_hmac('sha256', $rawPayload, $webhookSecret);
+
+    if (!hash_equals($expectedSignature, $receivedSignature)) {
+        logTransaction('payernex', 'Invalid HMAC signature. Payload: ' . $rawPayload, 'Error-Signature');
+        http_response_code(401);
+        exit();
+    }
+}
+
+// ─────────────────────────────────────────────
+// Step 2: Double-verify by checking order status via PayerNex API
 // ─────────────────────────────────────────────
 $orderRef = isset($GETDATA['order_ref']) ? $GETDATA['order_ref'] : '';
 
@@ -62,9 +75,8 @@ if (!empty($orderRef) && !empty($apiKey)) {
     curl_close($ch);
     $verifyData = json_decode($verifyResponse, true);
 
-    // If PayerNex says order is NOT paid, reject the webhook
     if (!$verifyData || !isset($verifyData['status']) || $verifyData['status'] !== 'paid') {
-        logTransaction('payernex', 'Verification failed. API says: ' . ($verifyData['status'] ?? 'unknown') . '. Payload: ' . $rawPayload, 'Error-Verify');
+        logTransaction('payernex', 'API verification failed. Status: ' . ($verifyData['status'] ?? 'unknown') . '. Payload: ' . $rawPayload, 'Error-Verify');
         http_response_code(401);
         exit();
     }

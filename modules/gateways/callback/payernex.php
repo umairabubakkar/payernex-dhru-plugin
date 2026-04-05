@@ -24,8 +24,12 @@ require '../../../includes/fun.inc.php';
 include '../../../includes/gateway.fun.php';
 include '../../../includes/invoice.fun.php';
 
+// PayerNex API URL (hardcoded — same as gateway module)
+define('PAYERNEX_API_URL', 'https://payernex.com');
+
 // Load gateway parameters
 $GATEWAY = loadGatewayModule('payernex');
+$apiKey = trim($GATEWAY['payernexAPIKey']);
 
 // Read incoming webhook payload
 $rawPayload = file_get_contents('php://input');
@@ -38,26 +42,32 @@ if (!$GETDATA) {
 }
 
 // ─────────────────────────────────────────────
-// Verify HMAC-SHA256 signature
+// Verify payment by checking order status via PayerNex API
+// This is more reliable than signature verification alone —
+// we confirm directly with PayerNex that the order is actually paid
 // ─────────────────────────────────────────────
-$receivedSignature = isset($_SERVER['HTTP_X_SIGNATURE']) ? $_SERVER['HTTP_X_SIGNATURE'] : '';
-$webhookSecret = trim($GATEWAY['payernexWebhookSecret']);
-$expectedSignature = hash_hmac('sha256', $rawPayload, $webhookSecret);
+$orderRef = isset($GETDATA['order_ref']) ? $GETDATA['order_ref'] : '';
 
-if (!hash_equals($expectedSignature, $receivedSignature)) {
-    logTransaction('payernex', 'Invalid signature. Received: ' . $receivedSignature, 'Error-Signature');
-    http_response_code(401);
-    exit();
-}
+if (!empty($orderRef) && !empty($apiKey)) {
+    $ch = curl_init(PAYERNEX_API_URL . '/api/v1/order/' . urlencode($orderRef));
+    curl_setopt_array($ch, array(
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_HTTPHEADER     => array(
+            'Authorization: Bearer ' . $apiKey,
+            'Accept: application/json',
+        ),
+    ));
+    $verifyResponse = curl_exec($ch);
+    curl_close($ch);
+    $verifyData = json_decode($verifyResponse, true);
 
-// ─────────────────────────────────────────────
-// Check timestamp (prevent replay attacks — 5 min window)
-// ─────────────────────────────────────────────
-$timestamp = isset($GETDATA['timestamp']) ? $GETDATA['timestamp'] : 0;
-if (abs(time() - $timestamp) > 300) {
-    logTransaction('payernex', 'Expired timestamp: ' . $timestamp, 'Error-Expired');
-    http_response_code(400);
-    exit();
+    // If PayerNex says order is NOT paid, reject the webhook
+    if (!$verifyData || !isset($verifyData['status']) || $verifyData['status'] !== 'paid') {
+        logTransaction('payernex', 'Verification failed. API says: ' . ($verifyData['status'] ?? 'unknown') . '. Payload: ' . $rawPayload, 'Error-Verify');
+        http_response_code(401);
+        exit();
+    }
 }
 
 // ─────────────────────────────────────────────

@@ -15,6 +15,11 @@
 
 defined("DEFINE_MY_ACCESS") or die('<h1 style="color: #C00; text-align: center;"><strong>Restricted Access</strong></h1>');
 
+// ─────────────────────────────────────────────
+// PayerNex Gateway Configuration (hardcoded)
+// ─────────────────────────────────────────────
+define('PAYERNEX_API_URL', 'https://payernex.com');
+
 function payernex_config()
 {
     global $config;
@@ -23,30 +28,16 @@ function payernex_config()
             'Type' => 'System',
             'Value' => 'PayerNex',
         ),
-        'payernexURL' => array(
-            'Name' => 'PayerNex URL',
-            'Type' => 'text',
-            'Size' => '50',
-            'Default' => '',
-            'Description' => 'Enter your PayerNex gateway URL. Example: https://pay.yourdomain.com',
-        ),
         'payernexAPIKey' => array(
             'Name' => 'API Key',
             'Type' => 'text',
             'Size' => '65',
             'Default' => '',
-            'Description' => 'Enter your PayerNex API Key. Get it from PayerNex Dashboard > Developer > API Keys.',
-        ),
-        'payernexWebhookSecret' => array(
-            'Name' => 'Webhook Secret',
-            'Type' => 'text',
-            'Size' => '65',
-            'Default' => '',
-            'Description' => 'Enter your PayerNex Webhook Secret. Get it from PayerNex Dashboard > Developer section.',
+            'Description' => 'Enter your PayerNex API Key. Sign up at payernex.com and get it from Dashboard > Developer > API Keys.',
         ),
         'notes' => array(
             'Type' => 'System',
-            'Value' => 'Webhook / Callback URL:<br /><strong>' . $config['site_address'] . 'modules/gateways/callback/payernex.php</strong><br /><br />Copy this URL — PayerNex will send payment notifications to this address.',
+            'Value' => '<strong>Gateway:</strong> PayerNex — Non-Custodial Binance Pay C2C<br /><br /><strong>Webhook URL (auto-configured):</strong><br />' . $config['site_address'] . 'modules/gateways/callback/payernex.php<br /><br />No additional setup needed. Just enter your API Key and save.',
         ),
     );
     return $configarray;
@@ -64,12 +55,12 @@ function payernex_link($params)
             : $params['amount'];
         $amount = formatCurrency2($amount);
         $returnurl = $params['returnurl'];
-        $apiURL = rtrim(trim($params['payernexURL']), '/');
+        $apiURL = PAYERNEX_API_URL;
         $apiKey = trim($params['payernexAPIKey']);
         $callbackUrl = $params['systemurl'] . '/modules/gateways/callback/payernex.php';
 
-        if (empty($apiURL) || empty($apiKey)) {
-            throw new Exception('PayerNex URL and API Key must be configured in Admin > Payment Gateways.');
+        if (empty($apiKey)) {
+            throw new Exception('PayerNex API Key is required. Get it from payernex.com > Dashboard > Developer.');
         }
 
         // Create order via PayerNex API

@@ -1,86 +1,84 @@
-# PayerNex — Dhru Fusion Integration Plugin
+# PayerNex — Dhru Fusion Payment Gateway Module
 
-## Files
+Non-Custodial Binance Pay C2C Payment Gateway for Dhru Fusion.
 
-| File | Description | Where to place |
-|------|-------------|----------------|
-| `payernex.php` | Payment gateway module | Dhru root directory (`/var/www/dhru/`) |
-| `payernexcallback.php` | Webhook receiver | Dhru root directory (`/var/www/dhru/`) |
+## File Structure
+
+```
+modules/
+└── gateways/
+    ├── payernex.php              ← Gateway module (config + payment link)
+    └── callback/
+        └── payernex.php          ← Webhook callback handler
+```
 
 ## Installation
 
 ### Step 1: Upload Files
 
-Copy both files to your Dhru Fusion root directory (where `admin.php`, `comm.php` etc. are located):
+Copy the `modules/` folder into your Dhru Fusion root directory. The files should end up at:
 
-```bash
-# Via SCP
-scp payernex.php payernexcallback.php user@your-dhru-server:/path/to/dhru/
-
-# Or via FTP — upload to the root of your Dhru installation
+```
+/your-dhru-root/modules/gateways/payernex.php
+/your-dhru-root/modules/gateways/callback/payernex.php
 ```
 
-### Step 2: Add Payment Gateway in Dhru Admin
+### Step 2: Add Gateway in Dhru Admin
 
-1. Go to **Dhru Admin Panel** → **Settings** → **Payment Gateways**
+1. Go to **Admin Panel** → **Settings** → **Payment Gateways**
 2. Click **Add New Gateway**
-3. Select **PayerNex** from the gateway list
-4. Fill in the configuration:
+3. Select **PayerNex** from the list
+4. Configure:
 
 | Field | Value |
 |-------|-------|
-| **PayerNex API URL** | Your PayerNex gateway URL (e.g. `https://pay.yourdomain.com`) |
-| **API Key** | Your API key from PayerNex Dashboard → Developer → API Keys |
-| **Webhook Secret** | Your webhook secret from PayerNex Dashboard → Developer |
-| **Webhook URL** | Auto-filled — copy this URL (usually `https://your-dhru-site.com/payernexcallback.php`) |
+| **PayerNex URL** | Your PayerNex gateway URL (e.g. `https://pay.yourdomain.com`) |
+| **API Key** | From PayerNex Dashboard → Developer → API Keys |
+| **Webhook Secret** | From PayerNex Dashboard → Developer section |
 
-5. Click **Save**
+5. Note the **Webhook / Callback URL** shown at the bottom — this is auto-generated
+6. Click **Save**
 
-### Step 3: Configure PayerNex Dashboard
+### Step 3: Configure PayerNex
 
-1. Login to your **PayerNex Dashboard**
-2. Go to **Gateway Settings**
-   - Enter your Binance API Key (Read-only permission)
-   - Enter your Binance API Secret
-   - Upload your Binance Funding Wallet QR code
-3. The system will auto-extract the QR URL
+1. Login to **PayerNex Dashboard** (`https://pay.yourdomain.com/dashboard`)
+2. **Gateway Settings** → Enter Binance API Key + Secret, upload QR code
+3. **Developer** → Note your API Key and Webhook Secret
 
 ### Step 4: Test
 
-1. Go to your Dhru site as a customer
-2. Click **Add Funds**
-3. Select **PayerNex** as payment method
-4. You'll be redirected to the PayerNex checkout page
-5. Scan QR with Binance app, enter amount, paste NOTE code
-6. Payment will be auto-detected and credited to customer account
+1. Create a test invoice in Dhru (small amount, e.g. $1)
+2. Click **Pay Now** → You should be redirected to PayerNex checkout
+3. Scan QR with Binance app → Enter amount → Paste NOTE code → Send
+4. Payment auto-detected → Dhru invoice marked as Paid
 
 ## How It Works
 
 ```
-Customer clicks "Add Funds" on Dhru
+Customer → "Add Funds" / "Pay Invoice" on Dhru site
     ↓
-Dhru calls PayerNex API (POST /api/v1/create-order)
+Dhru calls payernex_link() → POST /api/v1/create-order to PayerNex
     ↓
-PayerNex returns checkout URL
+PayerNex returns checkout URL → Customer redirected
     ↓
-Customer redirected to PayerNex checkout page
+Customer scans QR → Pays via Binance (C2C, zero network fee)
     ↓
-Customer scans QR, pays via Binance (C2C, zero fee)
+PayerNex detects payment → Sends webhook to callback/payernex.php
     ↓
-PayerNex detects payment (polling Binance API)
+Callback verifies HMAC signature → Validates amount → addPayment()
     ↓
-PayerNex sends webhook to payernexcallback.php
-    ↓
-Callback verifies signature + amount
-    ↓
-Dhru credits customer account
-    ↓
-Customer sees balance updated
+Dhru credits customer account → Invoice marked Paid
 ```
 
-## Webhook Payload
+## Security
 
-PayerNex sends this JSON to your callback URL:
+- **HMAC-SHA256** signature verification on every webhook
+- **Timestamp validation** — rejects requests older than 5 minutes (replay protection)
+- **Duplicate protection** — `checkTransID()` prevents double-crediting
+- **Amount validation** — 1% tolerance match against invoice total
+- **Non-custodial** — PayerNex never holds funds, payments go directly to merchant's Binance wallet
+
+## Webhook Payload (Received by Callback)
 
 ```json
 {
@@ -98,17 +96,18 @@ PayerNex sends this JSON to your callback URL:
 }
 ```
 
-## Security
-
-- All webhooks are signed with **HMAC-SHA256** (`X-Signature` header)
-- Timestamp validation prevents replay attacks (5 minute window)
-- Amount verification with 1% tolerance
-- Duplicate payment protection (checks invoice status before crediting)
-
 ## Troubleshooting
 
-- Check `payernex.log` in your Dhru root for detailed logs
-- Verify API URL doesn't have trailing slash
-- Verify API Key and Webhook Secret match your PayerNex dashboard
-- Make sure `payernexcallback.php` is accessible from the internet
-- Test webhook URL: `curl -I https://your-dhru-site.com/payernexcallback.php`
+| Issue | Solution |
+|-------|----------|
+| Gateway not showing | Ensure `payernex.php` is in `modules/gateways/` |
+| "Connection failed" | Check PayerNex URL is correct and reachable |
+| Payment not crediting | Check `tbl_gatewaylog` in DB for error details |
+| "Invalid signature" | Verify Webhook Secret matches PayerNex dashboard |
+| Callback not receiving | Ensure `callback/payernex.php` is web-accessible |
+
+## Requirements
+
+- Dhru Fusion v2024+
+- PHP 7.4+ with cURL extension
+- PayerNex account with Binance API configured

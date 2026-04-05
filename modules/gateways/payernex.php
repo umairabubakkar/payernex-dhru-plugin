@@ -38,15 +38,15 @@ function payernex_config()
         'notes' => array(
             'Type' => 'System',
             'Value' => '
-                <div style="background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 16px; margin: 8px 0;">
+                <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 16px; margin: 8px 0;">
                     <div style="margin-bottom: 12px;">
-                        <strong style="color: #F59E0B;">⚡ PayerNex</strong> — Non-Custodial Binance Pay C2C Payment Gateway
+                        <strong style="color: #e67e22;">⚡ PayerNex</strong> — Non-Custodial Binance Pay C2C Payment Gateway
                     </div>
                     <div style="margin-bottom: 12px;">
-                        <span style="color: #888;">Webhook / Callback URL:</span><br />
-                        <code style="background: #111; padding: 6px 12px; border-radius: 4px; display: inline-block; margin-top: 4px; color: #4ADE80; font-size: 13px;">' . $config['site_address'] . 'modules/gateways/callback/payernex.php</code>
+                        <span style="color: #666;">Webhook / Callback URL:</span><br />
+                        <code style="background: #e8f5e9; padding: 6px 12px; border-radius: 4px; display: inline-block; margin-top: 4px; color: #2e7d32; font-size: 13px; border: 1px solid #c8e6c9;">' . $config['site_address'] . 'modules/gateways/callback/payernex.php</code>
                     </div>
-                    <div style="color: #666; font-size: 12px;">
+                    <div style="color: #888; font-size: 12px;">
                         ✅ No additional setup needed — just enter your API Key above and save.<br />
                         ✅ Webhook URL is auto-configured. Payments will be credited automatically.
                     </div>

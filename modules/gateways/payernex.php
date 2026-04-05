@@ -37,7 +37,21 @@ function payernex_config()
         ),
         'notes' => array(
             'Type' => 'System',
-            'Value' => '<strong>Gateway:</strong> PayerNex — Non-Custodial Binance Pay C2C<br /><br /><strong>Webhook URL (auto-configured):</strong><br />' . $config['site_address'] . 'modules/gateways/callback/payernex.php<br /><br />No additional setup needed. Just enter your API Key and save.',
+            'Value' => '
+                <div style="background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 16px; margin: 8px 0;">
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #F59E0B;">⚡ PayerNex</strong> — Non-Custodial Binance Pay C2C Payment Gateway
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <span style="color: #888;">Webhook / Callback URL:</span><br />
+                        <code style="background: #111; padding: 6px 12px; border-radius: 4px; display: inline-block; margin-top: 4px; color: #4ADE80; font-size: 13px;">' . $config['site_address'] . 'modules/gateways/callback/payernex.php</code>
+                    </div>
+                    <div style="color: #666; font-size: 12px;">
+                        ✅ No additional setup needed — just enter your API Key above and save.<br />
+                        ✅ Webhook URL is auto-configured. Payments will be credited automatically.
+                    </div>
+                </div>
+            ',
         ),
     );
     return $configarray;

@@ -151,11 +151,40 @@ function payernex_link($params)
             throw new Exception('Invalid response — no checkout URL returned.');
         }
 
-        // Dhru pattern: on invoice page show button, otherwise auto-redirect
+        // Dhru pattern: on invoice page show button, otherwise open modal
         if (strpos($_SERVER['REQUEST_URI'], 'viewinvoice') !== false) {
             return '<div style="text-align: center;"><a href="' . htmlspecialchars($checkoutUrl) . '" style="display: inline-block; padding: 12px 40px; border-radius: 50px; background: #F59E0B; color: #000; font-size: 14px; font-weight: 700; text-decoration: none; box-shadow: 0 0 20px rgba(245,158,11,0.2);">Pay Now</a></div>';
         } else {
-            return '<script>document.location = "' . addslashes($checkoutUrl) . '";</script>';
+            // Open checkout in modal popup
+            $escapedUrl = htmlspecialchars($checkoutUrl, ENT_QUOTES);
+            return '
+            <div id="payernex-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+                <div style="position:relative;width:95%;max-width:480px;height:85vh;max-height:750px;border-radius:16px;overflow:hidden;box-shadow:0 25px 60px rgba(0,0,0,0.5);border:1px solid rgba(245,158,11,0.2);">
+                    <button onclick="document.getElementById(\'payernex-overlay\').remove();" style="position:absolute;top:12px;right:12px;z-index:10;width:32px;height:32px;border-radius:50%;border:none;background:rgba(0,0,0,0.6);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(10px);">&times;</button>
+                    <iframe src="' . $escapedUrl . '" style="width:100%;height:100%;border:none;border-radius:16px;" allow="clipboard-write"></iframe>
+                </div>
+            </div>
+            <script>
+            document.getElementById("payernex-overlay").addEventListener("click", function(e) {
+                if (e.target === this) this.remove();
+            });
+            // Poll for payment completion
+            var _pnxPoll = setInterval(function() {
+                try {
+                    var iframe = document.querySelector("#payernex-overlay iframe");
+                    if (!iframe) { clearInterval(_pnxPoll); return; }
+                    // Check if iframe redirected to success URL
+                    try {
+                        var loc = iframe.contentWindow.location.href;
+                        if (loc.indexOf("paid=1") > -1) {
+                            clearInterval(_pnxPoll);
+                            document.getElementById("payernex-overlay").remove();
+                            location.reload();
+                        }
+                    } catch(e) {}
+                } catch(e) { clearInterval(_pnxPoll); }
+            }, 2000);
+            </script>';
         }
     } catch (Exception $ex) {
         echo '<div align="center" style="padding: 20px; color: #C00;">PayerNex Gateway Error:<br />' . htmlspecialchars($ex->getMessage()) . '</div>';

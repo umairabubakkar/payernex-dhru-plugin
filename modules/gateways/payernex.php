@@ -153,7 +153,7 @@ function payernex_link($params)
 
         // Dhru pattern: on invoice page show button, otherwise auto-redirect
         if (strpos($_SERVER['REQUEST_URI'], 'viewinvoice') !== false) {
-            return '<a href="' . htmlspecialchars($checkoutUrl) . '" style="display: inline-block; padding: 12px 40px; border-radius: 50px; background: #F59E0B; color: #000; font-size: 14px; font-weight: 700; text-decoration: none; box-shadow: 0 0 20px rgba(245,158,11,0.2);">Pay Now</a>';
+            return '<div style="text-align: center;"><a href="' . htmlspecialchars($checkoutUrl) . '" style="display: inline-block; padding: 12px 40px; border-radius: 50px; background: #F59E0B; color: #000; font-size: 14px; font-weight: 700; text-decoration: none; box-shadow: 0 0 20px rgba(245,158,11,0.2);">Pay Now</a></div>';
         } else {
             return '<script>document.location = "' . addslashes($checkoutUrl) . '";</script>';
         }

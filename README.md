@@ -8,11 +8,12 @@ Accept payments from your Dhru Fusion customers through PayerNex. Funds land dir
 
 ### Step 1 — Download the plugin files
 
-This folder contains two files you need to upload to your Dhru server:
+This folder contains the files you need to upload to your Dhru server:
 
 ```
 modules/gateways/payernex.php              ← gateway module
 modules/gateways/callback/payernex.php     ← payment confirmation handler
+modules/gateways/callback/.htaccess        ← whitelist for the callback (merge with existing)
 ```
 
 ### Step 2 — Upload to your Dhru server
@@ -24,7 +25,21 @@ Using FTP, SFTP, or your hosting control panel's file manager, copy the two file
 | `modules/gateways/payernex.php` | `/your-dhru-folder/modules/gateways/payernex.php` |
 | `modules/gateways/callback/payernex.php` | `/your-dhru-folder/modules/gateways/callback/payernex.php` |
 
-> **Tip:** The simplest way is to just upload the whole `modules/` folder into your Dhru root — the paths will line up automatically. If the folders already exist (they do in every Dhru install), your FTP client will merge them.
+> **Tip:** The simplest way is to just upload the whole `modules/` folder into your Dhru root — the paths will line up automatically.
+
+#### Step 2a — Whitelist `payernex.php` in the callback `.htaccess` ⚠️ Important
+
+Dhru's `modules/gateways/callback/.htaccess` blocks **all** PHP files by default and only allows a specific list of known gateway callbacks. If you skip this step, every webhook from PayerNex will return **403 Forbidden** and your invoices will never get marked paid.
+
+Open `modules/gateways/callback/.htaccess` on your Dhru server and find the line that starts with `<FilesMatch`. Append `|^payernex\.php` to the end of the list, right before the closing `">`:
+
+```apache
+<FilesMatch "^wombi\.php|^gourlio\.php|…|^galaxpay\.php|^payernex\.php">
+```
+
+Save the file. No need to restart anything — Apache picks up the change on the next request.
+
+> **Don't overwrite the whole `.htaccess`** — your existing Dhru install has its own gateway list that you want to keep. We ship a reference copy at `modules/gateways/callback/.htaccess` in this plugin only for comparison; just add the one `|^payernex\.php` entry to your live file.
 
 ### Step 3 — Get your PayerNex credentials
 
@@ -80,6 +95,7 @@ Done — PayerNex is live on your Dhru panel.
 | "PayerNex" not visible under Payment Gateways | Make sure both files uploaded to the correct folders. Refresh the Dhru admin page. |
 | Customer redirected but sees "Invalid credentials" | **Merchant Token** in Dhru doesn't match the API Key in PayerNex. Re-copy and save. |
 | Payment completed on PayerNex but invoice still unpaid on Dhru | The Dhru callback URL (Step 4) isn't pasted into your PayerNex gateway's **Callback / Webhook URL** field (Step 5). Open the gateway in PayerNex → Edit → paste → Update. |
+| Callback gets `403 Forbidden` when hit directly | You skipped Step 2a — `payernex.php` isn't in the `<FilesMatch>` whitelist of `modules/gateways/callback/.htaccess`. Add `\|^payernex\.php` to the list and save. |
 | "Invalid signature" in Dhru gateway log | The **Webhook Secret** doesn't match. Copy it fresh from the PayerNex dashboard into Dhru. |
 | Redirect page says "Order not found" | Your Dhru server can't reach PayerNex. Check your server's outbound internet connection / firewall. |
 

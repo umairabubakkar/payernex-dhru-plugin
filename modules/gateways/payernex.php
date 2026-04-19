@@ -102,7 +102,7 @@ function payernex_link($params)
         $orderData = array(
             'amount'        => (float) $amount,
             'currency'      => $currency,
-            'customer_id'   => $clientName ?: ('DHRU-' . $invoiceid),
+            'customer_id'   => 'DHRU-' . $invoiceid,
             'customer_email'=> $params['clientdetails']['email'] ?? '',
             'description'   => $params['description'],
             'ipn_url'       => $callbackUrl,
@@ -114,6 +114,14 @@ function payernex_link($params)
         if ($localAmount && $localCurrency) {
             $orderData['local_amount'] = (float) $localAmount;
             $orderData['local_currency'] = $localCurrency;
+        }
+
+        // Send customer's current credit balance for checkout display
+        $creditInfo = $params['clientdetails']['credit'] ?? null;
+        if (is_array($creditInfo) && isset($creditInfo['credit'])) {
+            $orderData['customer_balance'] = (float) $creditInfo['credit'];
+        } elseif (is_numeric($creditInfo)) {
+            $orderData['customer_balance'] = (float) $creditInfo;
         }
 
         $orderData = json_encode($orderData);

@@ -43,44 +43,63 @@ if (!$GETDATA) {
 }
 
 // ─────────────────────────────────────────────
-// Step 1: Verify HMAC-SHA256 signature (if webhook secret is configured)
+// SECURITY: HMAC-SHA256 signature verification (MANDATORY)
 // ─────────────────────────────────────────────
-if (!empty($webhookSecret)) {
-    $receivedSignature = isset($_SERVER['HTTP_X_SIGNATURE']) ? $_SERVER['HTTP_X_SIGNATURE'] : '';
-    $expectedSignature = hash_hmac('sha256', $rawPayload, $webhookSecret);
+if (empty($webhookSecret)) {
+    logTransaction('payernex', 'Webhook secret not configured — rejecting all webhooks', 'Error-NoSecret');
+    http_response_code(500);
+    exit();
+}
 
-    if (!hash_equals($expectedSignature, $receivedSignature)) {
-        logTransaction('payernex', 'Invalid HMAC signature. Payload: ' . $rawPayload, 'Error-Signature');
-        http_response_code(401);
-        exit();
-    }
+$receivedSignature = isset($_SERVER['HTTP_X_SIGNATURE']) ? $_SERVER['HTTP_X_SIGNATURE'] : '';
+$expectedSignature = hash_hmac('sha256', $rawPayload, $webhookSecret);
+
+if (!hash_equals($expectedSignature, $receivedSignature)) {
+    logTransaction('payernex', 'Invalid HMAC signature. Payload: ' . $rawPayload, 'Error-Signature');
+    http_response_code(401);
+    exit();
 }
 
 // ─────────────────────────────────────────────
-// Step 2: Double-verify by checking order status via PayerNex API
+// SECURITY: Double-verify by checking order status via PayerNex API (MANDATORY)
 // ─────────────────────────────────────────────
 $orderRef = isset($GETDATA['order_ref']) ? $GETDATA['order_ref'] : '';
 
-if (!empty($orderRef) && !empty($apiKey)) {
-    $ch = curl_init(PAYERNEX_API_URL . '/api/v1/order/' . urlencode($orderRef));
-    curl_setopt_array($ch, array(
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 15,
-        CURLOPT_HTTPHEADER     => array(
-            'Authorization: Bearer ' . $apiKey,
-            'Accept: application/json',
-        ),
-    ));
-    $verifyResponse = curl_exec($ch);
-    curl_close($ch);
-    $verifyData = json_decode($verifyResponse, true);
-
-    if (!$verifyData || !isset($verifyData['status']) || $verifyData['status'] !== 'paid') {
-        logTransaction('payernex', 'API verification failed. Status: ' . ($verifyData['status'] ?? 'unknown') . '. Payload: ' . $rawPayload, 'Error-Verify');
-        http_response_code(401);
-        exit();
-    }
+if (empty($apiKey)) {
+    logTransaction('payernex', 'API key not configured — rejecting webhook', 'Error-NoApiKey');
+    http_response_code(500);
+    exit();
 }
+if (empty($orderRef)) {
+    logTransaction('payernex', 'Missing order_ref in payload', 'Error-NoOrderRef');
+    http_response_code(400);
+    exit();
+}
+
+$ch = curl_init(PAYERNEX_API_URL . '/api/v1/order/' . urlencode($orderRef));
+curl_setopt_array($ch, array(
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_TIMEOUT        => 15,
+    CURLOPT_HTTPHEADER     => array(
+        'Authorization: Bearer ' . $apiKey,
+        'Accept: application/json',
+    ),
+));
+$verifyResponse = curl_exec($ch);
+$verifyHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+$verifyData = json_decode($verifyResponse, true);
+
+$verifyStatus = isset($verifyData['data']['status']) ? $verifyData['data']['status'] : (isset($verifyData['status']) ? $verifyData['status'] : 'unknown');
+if (!$verifyData || $verifyStatus !== 'paid') {
+    logTransaction('payernex', 'API verification failed. HTTP: ' . $verifyHttpCode . ' Status: ' . $verifyStatus, 'Error-Verify');
+    http_response_code(401);
+    exit();
+}
+
+// Get the verified paid_amount from PayerNex API (trusted source, not webhook payload)
+$verifiedPaidAmount = isset($verifyData['data']['paid_amount']) ? floatval($verifyData['data']['paid_amount']) : 0;
+$verifiedPaidCurrency = isset($verifyData['data']['paid_currency']) ? $verifyData['data']['paid_currency'] : '';
 
 // ─────────────────────────────────────────────
 // Only process payment.completed events
@@ -95,15 +114,24 @@ if ($event !== 'payment.completed') {
 // ─────────────────────────────────────────────
 // Extract data from webhook payload
 // ─────────────────────────────────────────────
-$orderRef = isset($GETDATA['order_ref']) ? $GETDATA['order_ref'] : '';
-$paidAmount = isset($GETDATA['paid_amount']) ? $GETDATA['paid_amount'] : '0';
 $transactionId = isset($GETDATA['transaction_id']) ? $GETDATA['transaction_id'] : '';
-$customerId = isset($GETDATA['customer_id']) ? $GETDATA['customer_id'] : '';
 
-// Extract Dhru invoice ID from customer_id (format: DHRU-{invoiceId})
+// SECURITY: Extract invoice ID ONLY from description field (server-generated, not user-controlled)
+// Never trust customer_id directly — it could be manipulated
 $invoiceid = '';
-if (strpos($customerId, 'DHRU-') === 0) {
-    $invoiceid = str_replace('DHRU-', '', $customerId);
+$description = isset($GETDATA['description']) ? $GETDATA['description'] : '';
+if (preg_match('/#(\d+)/', $description, $matches)) {
+    $invoiceid = $matches[1];
+}
+// Fallback: customer_id with DHRU- prefix (set by our plugin, not user)
+if (!is_numeric($invoiceid) || !$invoiceid) {
+    $customerId = isset($GETDATA['customer_id']) ? $GETDATA['customer_id'] : '';
+    if (strpos($customerId, 'DHRU-') === 0) {
+        $extractedId = str_replace('DHRU-', '', $customerId);
+        if (is_numeric($extractedId) && $extractedId > 0) {
+            $invoiceid = $extractedId;
+        }
+    }
 }
 
 if (!is_numeric($invoiceid) || !$invoiceid) {
@@ -134,25 +162,27 @@ if (!$invoice) {
 }
 
 // ─────────────────────────────────────────────
-// Validate amount (with 1% tolerance)
+// SECURITY: Use API-verified paid_amount (not webhook payload)
+// Cap maximum credit to invoice total + 20 PKR (max possible bank offset)
 // ─────────────────────────────────────────────
 $invoiceTotal = floatval($invoice['total']);
-$receivedAmount = floatval($paidAmount);
-$tolerance = $invoiceTotal * 0.01;
+$maxAllowedAmount = $invoiceTotal + 20; // Max bank offset is 10 PKR, 20 PKR safety margin
 
-if ($receivedAmount < ($invoiceTotal - $tolerance)) {
-    logTransaction('payernex', $rawPayload, 'Error-AmountMismatch', 'invoice', $invoiceid);
-    http_response_code(200); // 200 so PayerNex doesn't retry
-    exit();
+// Use verified amount from API, not webhook (prevents amount inflation attack)
+$receivedAmount = $invoiceTotal;
+if ($verifiedPaidAmount >= $invoiceTotal && $verifiedPaidAmount <= $maxAllowedAmount) {
+    $receivedAmount = $verifiedPaidAmount;
 }
 
 // ─────────────────────────────────────────────
 // Process payment
 // ─────────────────────────────────────────────
 if ($invoice['status'] == 'Unpaid') {
-    // Use invoice total if received amount is close enough
-    if ($receivedAmount >= ($invoiceTotal - $tolerance) && $receivedAmount <= ($invoiceTotal + $tolerance)) {
-        $receivedAmount = $invoiceTotal;
+    // If customer paid more than invoice total (bank offset), update invoice amount first
+    if ($receivedAmount > $invoiceTotal) {
+        update_query('tbl_invoiceitems', array('amount' => $receivedAmount), array('invoiceid' => $invoiceid));
+        update_query('tbl_invoices', array('total' => $receivedAmount), array('id' => $invoiceid));
+        logTransaction('payernex', 'Invoice updated from ' . $invoiceTotal . ' to ' . $receivedAmount . ' (bank offset)', 'Amount-Updated', 'invoice', $invoiceid);
     }
 
     addPayment($invoiceid, $transactionId, $receivedAmount, 0, 'payernex');

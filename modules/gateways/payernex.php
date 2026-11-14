@@ -1,24 +1,163 @@
 <?php
 /*
  * ==========================================================
- * PAYERNEX - DHRU FUSION PAYMENT GATEWAY MODULE
+ * PAYERNEX - DHRU FUSION PAYMENT GATEWAY MODULE  (v2.0.0)
  *
  * Author: Umair Abubakkar
  * URL: https://github.com/umairabubakkar
  *
- * PayerNex — Non-Custodial Binance Pay C2C Payment Gateway
+ * 1. Invoice payments: the customer pays an invoice on the PayerNex checkout
+ *    (Binance C2C, bank, crypto, cards…); callback/payernex.php marks it paid.
+ * 2. Quick Pay (Express Wallet): every customer gets a permanent USDT/USDC
+ *    address on the Add Funds page. Whatever they send is added to their
+ *    balance automatically, with no invoice first.
  * ==========================================================
  *
  *  2026 PayerNex. All rights reserved.
- *
  */
 
 defined("DEFINE_MY_ACCESS") or die('<h1 style="color: #C00; text-align: center;"><strong>Restricted Access</strong></h1>');
 
-// ─────────────────────────────────────────────
-// PayerNex Gateway Configuration (hardcoded)
-// ─────────────────────────────────────────────
-define('PAYERNEX_API_URL', 'https://payernex.com');
+if (!defined('PAYERNEX_API_URL')) define('PAYERNEX_API_URL', getenv('PAYERNEX_API_URL') ?: 'https://payernex.com');
+define('PAYERNEX_PLUGIN_VERSION', '2.0.0');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Self-healing setup. Runs whenever DHRU loads this module (payment pages,
+// callbacks, admin gateway settings), so it also repairs itself after a DHRU
+// update overwrites the files below. Every step is a silent no-op if a file is
+// missing or not writable; payernex_setup_status() reports what happened.
+// ─────────────────────────────────────────────────────────────────────────────
+
+$GLOBALS['payernex_setup'] = array();
+
+// DHRU's gateway-callback folder only runs PHP files named in its .htaccess.
+function payernex_ensure_callback_allowed()
+{
+    $ht = __DIR__ . '/callback/.htaccess';
+    if (!is_file($ht)) { $GLOBALS['payernex_setup']['htaccess'] = 'missing'; return; }
+    $c = @file_get_contents($ht);
+    if ($c === false) { $GLOBALS['payernex_setup']['htaccess'] = 'unreadable'; return; }
+    if (preg_match('/\^payernex\\\\\.php/', $c)) { $GLOBALS['payernex_setup']['htaccess'] = 'ok'; return; }
+    if (!is_writable($ht)) { $GLOBALS['payernex_setup']['htaccess'] = 'not_writable'; return; }
+    $patched = preg_replace('/(<FilesMatch\s+")/i', '$1^payernex\\.php|', $c, 1);
+    if ($patched && $patched !== $c && @file_put_contents($ht, $patched) !== false) {
+        $GLOBALS['payernex_setup']['htaccess'] = 'patched';
+    } else {
+        $GLOBALS['payernex_setup']['htaccess'] = 'no_filesmatch';
+    }
+}
+
+// Stores DHRU's own site address for payernex/quickpay.php (never the request
+// Host header, which a caller can forge).
+function payernex_store_site()
+{
+    global $config;
+    $site = isset($config['site_address']) ? trim($config['site_address']) : '';
+    if ($site === '' || !preg_match('#^https?://#i', $site)) return null;
+    $site = rtrim($site, '/');
+    $file = dirname(dirname(__DIR__)) . '/payernex/site.json';
+    $want = json_encode(array('site' => $site));
+    if (is_dir(dirname($file)) && @file_get_contents($file) !== $want) @file_put_contents($file, $want);
+    return $site;
+}
+
+function payernex_settings()
+{
+    $lib = dirname(dirname(__DIR__)) . '/payernex/lib.php';
+    if (!is_file($lib)) return array();
+    require_once $lib;
+    $db = pnx_db();
+    return $db ? pnx_gateway_config($db) : array();
+}
+
+// Puts the Quick Pay widget at the top of every theme's Add Funds page (or
+// removes it when Quick Pay is off). A ZIP install can't edit templates, so the
+// block is inserted between markers, updated when the plugin version changes,
+// and re-added if a DHRU update replaces the template.
+function payernex_sync_widget($settings, $site)
+{
+    $root = dirname(dirname(__DIR__));
+    $widgetFile = $root . '/payernex/quickpay_widget.tpl';
+    $on = isset($settings['quickpay']) && in_array(strtolower($settings['quickpay']), array('on', 'yes', '1'), true)
+        && !empty($settings['payernexAPIKey']) && $site;
+    $hide = isset($settings['showmanual']) && in_array(strtolower($settings['showmanual']), array('on', 'yes', '1'), true) ? '0' : '1';
+    $tag = 'PAYERNEX-QUICKPAY v' . PAYERNEX_PLUGIN_VERSION . ' hide=' . $hide;
+    $result = array();
+    $changed = false;
+
+    foreach ((array) @glob($root . '/templates/*/client_addfunds.tpl') as $tplFile) {
+        $theme = basename(dirname($tplFile));
+        $tpl = @file_get_contents($tplFile);
+        if ($tpl === false) continue;
+        // The block is stored as "\n{* tag *}\n…\n{* /PAYERNEX-QUICKPAY *}\n", so removing it restores the template byte for byte.
+        $hasBlock = preg_match('/\n?\{\* PAYERNEX-QUICKPAY[^*]*\*\}.*?\{\* \/PAYERNEX-QUICKPAY \*\}\n?/s', $tpl, $m);
+        if ($hasBlock && $on && strpos(ltrim($m[0], "\n"), '{* ' . $tag . ' *}') === 0) { $result[$theme] = 'ok'; continue; }
+        if (!is_writable($tplFile)) { $result[$theme] = 'not_writable'; continue; }
+        $clean = $hasBlock ? str_replace($m[0], '', $tpl) : $tpl;
+        if (!$on) {
+            if ($hasBlock && @file_put_contents($tplFile, $clean) !== false) { $changed = true; }
+            $result[$theme] = 'off';
+            continue;
+        }
+        $widget = @file_get_contents($widgetFile);
+        if ($widget === false || $widget === '') { $result[$theme] = 'widget_missing'; continue; }
+        $base = (string) parse_url($site, PHP_URL_PATH);
+        $widget = str_replace(array('__PNX_BASE__', '__PNX_HIDE__'), array(htmlspecialchars(rtrim($base, '/'), ENT_QUOTES), $hide), $widget);
+        $block = '{* ' . $tag . ' *}' . "\n" . $widget . "\n" . '{* /PAYERNEX-QUICKPAY *}' . "\n";
+        // Top of the Add Funds card in the stock DHRU template.
+        $anchor = 'border col-lg-5 p-4 rounded m-auto">';
+        $pos = strpos($clean, $anchor);
+        if ($pos === false) { $result[$theme] = 'no_anchor'; continue; }
+        $at = $pos + strlen($anchor);
+        $new = substr($clean, 0, $at) . "\n" . $block . substr($clean, $at);   // $block ends with "\n"
+        if (@file_put_contents($tplFile, $new) !== false) { $result[$theme] = 'injected'; $changed = true; }
+        else { $result[$theme] = 'not_writable'; }
+    }
+    if ($changed) {
+        foreach ((array) @glob($root . '/templates_c/*client_addfunds*') as $c) { @unlink($c); }
+    }
+    $GLOBALS['payernex_setup']['widget'] = $result;
+}
+
+function payernex_selfheal()
+{
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    try {
+        payernex_ensure_callback_allowed();
+        $site = payernex_store_site();
+        payernex_sync_widget(payernex_settings(), $site);
+        $GLOBALS['payernex_setup']['site'] = $site;
+    } catch (Throwable $e) {
+        $GLOBALS['payernex_setup']['error'] = $e->getMessage();
+    }
+}
+payernex_selfheal();
+
+function payernex_setup_status_html()
+{
+    $s = $GLOBALS['payernex_setup'];
+    $line = function ($ok, $text) {
+        return '<div style="margin:3px 0;color:' . ($ok ? '#2e7d32' : '#c62828') . '">' . ($ok ? '✅ ' : '⚠️ ') . $text . '</div>';
+    };
+    $out = '';
+    $h = isset($s['htaccess']) ? $s['htaccess'] : 'unknown';
+    $out .= $line(in_array($h, array('ok', 'patched'), true), $h === 'patched' ? 'Callback allowed in callback/.htaccess (added just now).'
+        : ($h === 'ok' ? 'Callback allowed in callback/.htaccess.' : 'Could not update modules/gateways/callback/.htaccess (' . htmlspecialchars($h) . '). Add <code>|^payernex\.php</code> to its FilesMatch line.'));
+    $w = isset($s['widget']) ? $s['widget'] : array();
+    if (!$w) $out .= $line(false, 'No Add Funds template found (templates/*/client_addfunds.tpl).');
+    foreach ($w as $theme => $st) {
+        $msg = array(
+            'ok' => 'Quick Pay widget is on the Add Funds page', 'injected' => 'Quick Pay widget added to the Add Funds page',
+            'off' => 'Quick Pay is off (widget removed)', 'not_writable' => 'Template is not writable, so the widget could not be added',
+            'no_anchor' => 'Customised template: add the widget by hand (see README)', 'widget_missing' => 'payernex/quickpay_widget.tpl is missing (upload the payernex/ folder)'
+        );
+        $out .= $line(in_array($st, array('ok', 'injected', 'off'), true), htmlspecialchars(isset($msg[$st]) ? $msg[$st] : $st) . ' <span style="color:#888">(' . htmlspecialchars($theme) . ')</span>');
+    }
+    if (isset($s['error'])) $out .= $line(false, 'Setup error: ' . htmlspecialchars($s['error']));
+    return $out;
+}
 
 function payernex_config()
 {
@@ -33,29 +172,39 @@ function payernex_config()
             'Type' => 'text',
             'Size' => '65',
             'Default' => '',
-            'Description' => 'Enter your PayerNex Merchant Token. Get it from payernex.com > Dashboard > Developer > API Keys.',
+            'Description' => 'Your PayerNex live API key: payernex.com → Dashboard → Developer → API Keys.',
         ),
         'payernexWebhookSecret' => array(
             'Name' => 'Webhook Secret',
             'Type' => 'text',
             'Size' => '65',
             'Default' => '',
-            'Description' => 'Enter your PayerNex Webhook Secret. Get it from payernex.com > Dashboard > Developer > API Keys.',
+            'Description' => 'From the same PayerNex page. Verifies every payment notification.',
+        ),
+        'quickpay' => array(
+            'Name' => 'Quick Pay (Express Wallet)',
+            'Type' => 'yesno',
+            'Description' => 'Show the Quick Pay widget on the Add Funds page: each customer gets a permanent USDT/USDC address and is credited automatically. Set up Express Wallet in PayerNex first (Payments → Express Wallet).',
+        ),
+        'showmanual' => array(
+            'Name' => 'Keep the standard Add Funds form',
+            'Type' => 'yesno',
+            'Description' => 'Leave off to show only Quick Pay on the Add Funds page. Turn on to also show DHRU\'s normal form below it.',
         ),
         'notes' => array(
             'Type' => 'System',
             'Value' => '
                 <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 16px; margin: 8px 0;">
                     <div style="margin-bottom: 12px;">
-                        <strong style="color: #e67e22;">⚡ PayerNex</strong> — Non-Custodial Binance Pay C2C Payment Gateway
+                        <strong style="color: #e67e22;">⚡ PayerNex</strong> v' . PAYERNEX_PLUGIN_VERSION . ' — invoice payments and Quick Pay (Express Wallet)
                     </div>
                     <div style="margin-bottom: 12px;">
-                        <span style="color: #666;">Webhook / Callback URL:</span><br />
-                        <code style="background: #e8f5e9; padding: 6px 12px; border-radius: 4px; display: inline-block; margin-top: 4px; color: #2e7d32; font-size: 13px; border: 1px solid #c8e6c9;">' . $config['site_address'] . 'modules/gateways/callback/payernex.php</code>
+                        <span style="color: #666;">Callback URL (filled in automatically for both):</span><br />
+                        <code style="background: #e8f5e9; padding: 6px 12px; border-radius: 4px; display: inline-block; margin-top: 4px; color: #2e7d32; font-size: 13px; border: 1px solid #c8e6c9;">' . htmlspecialchars($config['site_address']) . 'modules/gateways/callback/payernex.php</code>
                     </div>
+                    <div style="font-size: 12.5px; margin-bottom: 10px;">' . payernex_setup_status_html() . '</div>
                     <div style="color: #888; font-size: 12px;">
-                        ✅ Enter your Merchant Token and Webhook Secret from PayerNex Dashboard > Developer > API Keys.<br />
-                        ✅ Webhook URL is auto-configured. Payments will be credited automatically.
+                        Save, then open this page again to see the setup status. Quick Pay credits arrive as paid "Add Funds" invoices.
                     </div>
                 </div>
             ',
@@ -88,11 +237,6 @@ function payernex_link($params)
         if (empty($apiKey)) {
             throw new Exception('PayerNex API Key is required. Get it from payernex.com > Dashboard > Developer.');
         }
-
-        // Build customer name from client details
-        $clientName = trim(
-            ($params['clientdetails']['firstname'] ?? '') . ' ' . ($params['clientdetails']['lastname'] ?? '')
-        );
 
         // Local currency amount (PKR) for bank transfer
         $localAmount = $params['basecurrencyamount'] > 0 ? $params['basecurrencyamount'] : null;

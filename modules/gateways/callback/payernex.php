@@ -25,7 +25,7 @@ include '../../../includes/gateway.fun.php';
 include '../../../includes/invoice.fun.php';
 
 // PayerNex API URL (hardcoded — same as gateway module)
-define('PAYERNEX_API_URL', 'https://payernex.com');
+if (!defined('PAYERNEX_API_URL')) define('PAYERNEX_API_URL', getenv('PAYERNEX_API_URL') ?: 'https://payernex.com');
 
 // Load gateway parameters
 $GATEWAY = loadGatewayModule('payernex');
@@ -57,6 +57,14 @@ $expectedSignature = hash_hmac('sha256', $rawPayload, $webhookSecret);
 if (!hash_equals($expectedSignature, $receivedSignature)) {
     logTransaction('payernex', 'Invalid HMAC signature. Payload: ' . $rawPayload, 'Error-Signature');
     http_response_code(401);
+    exit();
+}
+
+// ─────────────────────────────────────────────
+// Quick Pay (Express Wallet) deposit: credit the customer's balance
+// ─────────────────────────────────────────────
+if (isset($GETDATA['type']) && $GETDATA['type'] === 'express_wallet.paid') {
+    payernex_express_credit($GETDATA, $apiKey, $rawPayload);
     exit();
 }
 
@@ -193,3 +201,109 @@ if ($invoice['status'] == 'Unpaid') {
 
 http_response_code(200);
 echo json_encode(array('status' => 'ok'));
+
+/**
+ * Credits one Express Wallet deposit as a paid "Add Funds" invoice.
+ *
+ * The HMAC signature was checked above. As a second check the deposit is read
+ * back from the PayerNex API with this store's API key (only this merchant's
+ * deposits are visible), and that answer — not the notification — decides the
+ * customer and the amount. A deposit is credited once: its transaction id is
+ * PNXEW-<deposit id>, guarded by checkTransID() under a MySQL lock.
+ */
+function payernex_express_credit($event, $apiKey, $rawPayload)
+{
+    $depositId = isset($event['data']['deposit_id']) ? (int) $event['data']['deposit_id'] : 0;
+    if ($depositId <= 0 || empty($apiKey)) {
+        logTransaction('payernex', $rawPayload, 'Express-Invalid');
+        http_response_code(400);
+        return;
+    }
+    $transid = 'PNXEW-' . $depositId;
+
+    $ch = curl_init(PAYERNEX_API_URL . '/api/v1/express-wallet/deposits/' . $depositId);
+    curl_setopt_array($ch, array(
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15,
+        CURLOPT_HTTPHEADER => array('Authorization: Bearer ' . $apiKey, 'Accept: application/json'),
+    ));
+    $resp = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $api = json_decode((string) $resp, true);
+    $dep = isset($api['data']) ? $api['data'] : null;
+    if ($code !== 200 || !$dep || (isset($dep['status']) ? $dep['status'] : '') !== 'credited') {
+        logTransaction('payernex', 'Express deposit ' . $depositId . ' not confirmed by API (HTTP ' . $code . ')', 'Express-Unconfirmed');
+        http_response_code($code === 200 ? 409 : 502);   // non-2xx: PayerNex retries later
+        return;
+    }
+    $clientId = isset($dep['merchant_client_id']) ? (string) $dep['merchant_client_id'] : '';
+    if (!preg_match('/^dhru-(\d+)$/', $clientId, $mm)) {
+        // Not a Quick Pay customer of this DHRU store (e.g. created by another integration).
+        logTransaction('payernex', $rawPayload, 'Express-NotDhruCustomer');
+        http_response_code(200);
+        return;
+    }
+    $userId = (int) $mm[1];
+    $amount = round((float) $dep['credited_amount'], 2);
+    if ($amount <= 0) {
+        logTransaction('payernex', $rawPayload, 'Express-ZeroAmount');
+        http_response_code(200);
+        return;
+    }
+
+    $lock = 'pnxew_' . $depositId;
+    $lr = mysqli_fetch_row(dquery("SELECT GET_LOCK('" . $lock . "', 15)"));
+    if (!$lr || (int) $lr[0] !== 1) {
+        http_response_code(503);   // retried by PayerNex
+        return;
+    }
+    try {
+        if (checkTransID($transid)) {   // already credited
+            http_response_code(200);
+            return;
+        }
+        $u = mysqli_fetch_assoc(select_query('tblUsers', 'id', array('id' => $userId)));
+        if (!$u) {
+            logTransaction('payernex', $rawPayload, 'Express-UserNotFound');
+            http_response_code(200);
+            return;
+        }
+        $invoiceid = payernex_create_addfunds_invoice($userId, $amount);
+        if ($invoiceid <= 0) {
+            logTransaction('payernex', $rawPayload, 'Express-InvoiceFailed');
+            http_response_code(500);
+            return;
+        }
+        addPayment($invoiceid, $transid, $amount, 0, 'payernex');
+        logTransaction('payernex', $rawPayload, 'Successful', 'invoice', $invoiceid);
+        http_response_code(200);
+        echo json_encode(array('status' => 'ok', 'invoice' => $invoiceid));
+    } finally {
+        dquery("SELECT RELEASE_LOCK('" . $lock . "')");
+    }
+}
+
+/** Unpaid "Add Funds" invoice for the deposit; addPayment() then settles it. */
+function payernex_create_addfunds_invoice($userId, $amount)
+{
+    $uid = (int) $userId;
+    $amt = number_format((float) $amount, 3, '.', '');
+    $today = date('Y-m-d');
+    $ts = (string) time();
+    dquery("INSERT INTO tbl_invoices
+        (userid, invoicenum, date, duedate, datepaid, subtotal, credit, tax, tax2, shippingtax,
+         total, taxrate, taxrate2, status, paymentmethod, notes, adminid, promotion, posdiscount,
+         discount, screenshot, screenshotenc, businessid, orderstatus, time)
+        VALUES ('$uid','','$today','$today','0000-00-00 00:00:00','$amt',0,0,0,0,'$amt',0,0,'Unpaid',
+         'payernex','PayerNex Quick Pay','','0','','','','','','new','$ts')");
+    $row = mysqli_fetch_assoc(dquery("SELECT LAST_INSERT_ID() AS id"));
+    $invid = (int) $row['id'];
+    if ($invid > 0) {
+        dquery("INSERT INTO tbl_invoiceitems
+            (invoiceid, warehouseid, userid, type, relid, description, amount, taxed, shippingtax,
+             duedate, paymentmethod, notes, qnt, promotion, promotion_code, pos, bundleid, warehouse,
+             serviceid, service, used, serial)
+            VALUES ('$invid',0,'$uid','AddFunds',0,'+Add Funds','$amt',0,0,'$today','payernex',
+             '','','','',0,0,0,0,'',0,'')");
+    }
+    return $invid;
+}

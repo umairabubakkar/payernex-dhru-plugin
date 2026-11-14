@@ -54,7 +54,7 @@ if ($code < 200 || $code >= 300 || !is_array($res) || !isset($res['data']['order
 $d = $res['data'];
 pnx_out(200, array(
     'ok'          => true,
-    'order_url'   => $d['order_url'] . '?embed=1',
+    'order_url'   => $d['order_url'],
     'address'     => $d['address'],
     'networks'    => isset($d['networks']) ? $d['networks'] : array(),
     'min_deposit' => isset($d['min_deposit']) ? $d['min_deposit'] : null,

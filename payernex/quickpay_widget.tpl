@@ -30,25 +30,25 @@
   .pnxqp-foot { display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 24px 14px; border-top: 1px solid rgba(255,255,255,.07); font-size: 12px; color: #9b978b; }
   .pnxqp-foot span::before { content: '✓ '; color: #4ade80; font-weight: 800; }
   .pnxqp-err { color: #fca5a5; font-size: 13px; padding: 0 24px 14px; display: none; }
-  .pnxqp-bg { position: fixed; inset: 0; z-index: 100000; background: rgba(8,8,10,.72); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); display: none; align-items: center; justify-content: center; padding: 16px; }
-  .pnxqp-bg.show { display: flex; }
-  .pnxqp-box { position: relative; width: 100%; max-width: 960px; height: min(820px, 92vh); border-radius: 20px; overflow: hidden; background: #f4f4f1; box-shadow: 0 30px 80px -20px rgba(0,0,0,.7); }
-  .pnxqp-box iframe { width: 100%; height: 100%; border: 0; display: block; }
-  .pnxqp-x { position: absolute; top: 12px; right: 12px; z-index: 2; width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(17,17,17,.75); color: #fff; font-size: 20px; line-height: 36px; cursor: pointer; }
-  .pnxqp-done { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 3; background: #0f2a1b; color: #d1fae5; border: 1px solid rgba(74,222,128,.4); border-radius: 12px; padding: 12px 18px; font-size: 14px; font-weight: 700; display: none; box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); }
+  .pnxqp-wait { display: none; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 24px 16px; padding: 12px 14px; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); font-size: 13.5px; color: #e7e5dc; }
+  .pnxqp-wait.show { display: flex; }
+  .pnxqp-wait.ok { background: rgba(74,222,128,.08); border-color: rgba(74,222,128,.35); color: #d1fae5; }
+  .pnxqp-dot { width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; animation: pnxqp-p 1.6s infinite; flex: none; }
+  .pnxqp-wait.ok .pnxqp-dot { background: #4ade80; animation: none; }
+  @keyframes pnxqp-p { 0% { box-shadow: 0 0 0 0 rgba(245,158,11,.55); } 70% { box-shadow: 0 0 0 8px rgba(245,158,11,0); } 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); } }
+  .pnxqp-link { background: none; border: 0; color: #fcd34d; font-weight: 700; text-decoration: underline; cursor: pointer; padding: 0; font-size: 13px; }
   @media (max-width: 640px) {
     .pnxqp-in { padding: 18px 16px; }
     .pnxqp-side { width: 100%; justify-content: space-between; margin-left: 0; }
     .pnxqp-bal { text-align: left; }
     .pnxqp-foot { padding: 10px 16px 14px; }
-    .pnxqp-bg { padding: 0; }
-    .pnxqp-box { height: 100%; max-width: none; border-radius: 0; }
+    .pnxqp-wait { margin: 0 16px 14px; }
   }
 </style>
 {/literal}
   <div class="pnxqp-in">
     <div class="pnxqp-mark" aria-hidden="true">
-      <img src="https://payernex.com/images/favicon-icon.svg" width="30" height="30" alt="">
+      <svg width="34" height="34" viewBox="0.45 0.5 1.3 1.3" aria-hidden="true"><path fill="#F59E0B" d="M1.17 1.23l-0.55 0 0 0.47 0.55 0 0 -0.47c0.08,0 0.32,0.02 0.38,-0.01 0.1,-0.04 0.12,-0.16 0.05,-0.25l-0.26 -0.33c-0.03,-0.04 -0.07,-0.11 -0.1,-0.11 -0.18,0 -0.43,-0.01 -0.61,0 0.02,0.03 0.37,0.48 0.41,0.53 0.02,0.03 0.12,0.15 0.13,0.17z"/></svg>
     </div>
     <div class="pnxqp-main">
       <div class="pnxqp-t">Quick Pay · USDT / USDC <span class="pnxqp-badge">Instant</span></div>
@@ -64,14 +64,12 @@
     </div>
   </div>
   <div class="pnxqp-err" id="pnxqp-err" role="alert"></div>
-  <div class="pnxqp-foot"><span>Credited in about a minute</span><span>Same address every time</span><span>Secured by PayerNex</span></div>
-</div>
-<div class="pnxqp-bg" id="pnxqp-bg" role="dialog" aria-modal="true" aria-label="Quick Pay">
-  <div class="pnxqp-box">
-    <button type="button" class="pnxqp-x" id="pnxqp-x" aria-label="Close">&times;</button>
-    <iframe id="pnxqp-frame" title="PayerNex Quick Pay" allow="clipboard-write"></iframe>
-    <div class="pnxqp-done" id="pnxqp-done" aria-live="polite"></div>
+  <div class="pnxqp-wait" id="pnxqp-wait" aria-live="polite">
+    <span class="pnxqp-dot"></span>
+    <span id="pnxqp-wait-t">Quick Pay is open in a new window. Send your payment there; this page updates by itself.</span>
+    <button type="button" class="pnxqp-link" id="pnxqp-again">Reopen window</button>
   </div>
+  <div class="pnxqp-foot"><span>Credited in about a minute</span><span>Same address every time</span><span>Secured by PayerNex</span></div>
 </div>
 {literal}
 <script>
@@ -81,49 +79,63 @@
   var ORIGIN = 'https://payernex.com';
   var $ = function (id) { return document.getElementById(id); };
   var user = box.getAttribute('data-user'), payUrl = box.getAttribute('data-pay'), statusUrl = box.getAttribute('data-status');
+  var win = null, url = null, closedTimer = null;
 
   if (box.getAttribute('data-hide-manual') === '1') {
     // Show only Quick Pay: hide DHRU's own Add Funds form that follows the widget.
-    var n = $('pnxqp-bg').nextElementSibling;
+    var n = box.nextElementSibling;
     while (n) { if (n.tagName !== 'STYLE' && n.tagName !== 'SCRIPT') n.style.display = 'none'; n = n.nextElementSibling; }
   }
 
   function err(msg) { var e = $('pnxqp-err'); e.textContent = msg || ''; e.style.display = msg ? 'block' : 'none'; }
-  function close() { $('pnxqp-bg').classList.remove('show'); document.body.style.overflow = ''; }
-  $('pnxqp-x').onclick = close;
-  $('pnxqp-bg').addEventListener('click', function (e) { if (e.target === this) close(); });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+  function wait(text, ok) { var w = $('pnxqp-wait'); w.classList.add('show'); w.classList.toggle('ok', !!ok); if (text) $('pnxqp-wait-t').textContent = text; }
+
+  // The PayerNex page opens in its own window: shop pages often have a
+  // Content-Security-Policy that blocks payment pages inside an iframe.
+  function openWindow(target) {
+    var W = Math.min(980, screen.availWidth - 40), H = Math.min(900, screen.availHeight - 60);
+    var L = Math.max(0, (screen.availWidth - W) / 2), T = Math.max(0, (screen.availHeight - H) / 2);
+    return window.open(target || '', 'pnx_quickpay', 'width=' + W + ',height=' + H + ',left=' + L + ',top=' + T + ',menubar=no,toolbar=no,location=yes');
+  }
+  function watchClosed() {
+    clearInterval(closedTimer);
+    closedTimer = setInterval(function () { if (win && win.closed) { clearInterval(closedTimer); $('pnxqp-wait-t').textContent = 'Quick Pay window closed. Paid already? Your balance updates by itself in about a minute.'; } }, 1500);
+  }
 
   $('pnxqp-open').onclick = function () {
     var btn = this; btn.disabled = true; err('');
+    // Open the window inside the click so popup blockers allow it.
+    win = url ? openWindow(url) : openWindow('');
+    if (win && !url) { try { win.document.write('<p style="font:16px sans-serif;padding:24px">Opening Quick Pay…</p>'); } catch (e) {} }
     fetch(payUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'username=' + encodeURIComponent(user), credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (!d || !d.ok) { err((d && d.error) || 'Quick Pay is unavailable right now.'); return; }
-        if ($('pnxqp-frame').getAttribute('src') !== d.order_url) $('pnxqp-frame').setAttribute('src', d.order_url);
-        $('pnxqp-done').style.display = 'none';
-        $('pnxqp-bg').classList.add('show'); document.body.style.overflow = 'hidden';
+        if (!d || !d.ok) { if (win) win.close(); err((d && d.error) || 'Quick Pay is unavailable right now.'); return; }
+        url = d.order_url;
+        if (!win) { window.location.href = url; return; }   // popup blocked: open it here
+        win.location.href = url;
+        try { win.focus(); } catch (e) {}
+        wait('Quick Pay is open in a new window. Send your payment there; this page updates by itself.', false);
+        watchClosed();
       })
-      .catch(function () { err('Network error. Please try again.'); })
+      .catch(function () { if (win) win.close(); err('Network error. Please try again.'); })
       .then(function () { btn.disabled = false; });
   };
+  $('pnxqp-again').onclick = function () { if (url) { win = openWindow(url); watchClosed(); } else $('pnxqp-open').click(); };
 
   // Wait until DHRU has recorded the deposit, then refresh the balance.
   function waitCredited(id, tries) {
     fetch(statusUrl + '?d=' + encodeURIComponent(id), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (s) {
-      if (s && s.credited) { $('pnxqp-done').textContent = 'Balance updated. Refreshing…'; setTimeout(function () { location.reload(); }, 1500); }
+      if (s && s.credited) { wait('Balance updated. Refreshing…', true); setTimeout(function () { location.reload(); }, 1500); }
       else if (tries > 0) setTimeout(function () { waitCredited(id, tries - 1); }, 3000);
-      else $('pnxqp-done').textContent = 'Payment received. Your balance will update shortly.';
+      else wait('Payment received. Your balance will update shortly.', true);
     }).catch(function () { if (tries > 0) setTimeout(function () { waitCredited(id, tries - 1); }, 4000); });
   }
 
   window.addEventListener('message', function (e) {
     if (e.origin !== ORIGIN || !e.data || typeof e.data !== 'object') return;
-    if (e.data.type === 'payernex:express_wallet.close') close();
     if (e.data.type === 'payernex:express_wallet.paid') {
-      var d = $('pnxqp-done');
-      d.textContent = 'Payment received: ' + e.data.credited_amount + ' USD is being added to your balance…';
-      d.style.display = 'block';
+      wait('Payment received: ' + e.data.credited_amount + ' USD is being added to your balance…', true);
       if (e.data.deposit_id) waitCredited(e.data.deposit_id, 30);
     }
   });

@@ -102,6 +102,11 @@ The widget is placed automatically in every `templates/*/client_addfunds.tpl` th
 
 ## Changelog
 
+**2.0.1**
+- Quick Pay opens in its own window (many shops' Content-Security-Policy blocks payment pages in an iframe).
+- Credits are converted to the customer's currency with DHRU's currency rates (e.g. USD → PKR).
+- The widget sits before the deposit form on newer DHRU templates; PayerNex logo is built in.
+
 **2.0.0**
 - Quick Pay (Express Wallet): a permanent deposit address per customer on the Add Funds page, credited automatically as a native Add Funds payment.
 - Self-setup: allows the callback in `callback/.htaccess` and places the widget on the Add Funds page, again after Dhru updates; status shown in the gateway settings.

@@ -19,7 +19,7 @@
 defined("DEFINE_MY_ACCESS") or die('<h1 style="color: #C00; text-align: center;"><strong>Restricted Access</strong></h1>');
 
 if (!defined('PAYERNEX_API_URL')) define('PAYERNEX_API_URL', getenv('PAYERNEX_API_URL') ?: 'https://payernex.com');
-define('PAYERNEX_PLUGIN_VERSION', '2.0.0');
+define('PAYERNEX_PLUGIN_VERSION', '2.0.1');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Self-healing setup. Runs whenever DHRU loads this module (payment pages,

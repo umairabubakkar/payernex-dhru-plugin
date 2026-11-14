@@ -267,6 +267,15 @@ function payernex_express_credit($event, $apiKey, $rawPayload)
             http_response_code(200);
             return;
         }
+        // PayerNex credits in USD. DHRU invoices are in the customer's own
+        // currency (e.g. PKR), so convert with DHRU's currency rates.
+        $local = payernex_usd_to_customer_currency($userId, $amount);
+        if ($local === null) {
+            logTransaction('payernex', $rawPayload, 'Express-NoCurrencyRate');
+            http_response_code(500);   // retried by PayerNex once the rate is fixed
+            return;
+        }
+        $amount = $local;
         $invoiceid = payernex_create_addfunds_invoice($userId, $amount);
         if ($invoiceid <= 0) {
             logTransaction('payernex', $rawPayload, 'Express-InvoiceFailed');
@@ -280,6 +289,26 @@ function payernex_express_credit($event, $apiKey, $rawPayload)
     } finally {
         dquery("SELECT RELEASE_LOCK('" . $lock . "')");
     }
+}
+
+/**
+ * USD → the customer's currency, using DHRU's tbl_currencies rates (each rate
+ * is per 1 unit of the default currency). Returns null when a rate is missing.
+ */
+function payernex_usd_to_customer_currency($userId, $usd)
+{
+    $u = mysqli_fetch_assoc(dquery("SELECT default_currency FROM tblUsers WHERE id=" . (int) $userId));
+    $rates = array(); $default = null;
+    $r = dquery("SELECT id, code, rate, `default` FROM tbl_currencies");
+    while ($row = mysqli_fetch_assoc($r)) {
+        $rates[(int) $row['id']] = array('code' => strtoupper(trim($row['code'])), 'rate' => (float) $row['rate']);
+        if ((int) $row['default'] === 1) $default = (int) $row['id'];
+    }
+    $usdId = null;
+    foreach ($rates as $id => $c) if ($c['code'] === 'USD') { $usdId = $id; break; }
+    $cust = ($u && (int) $u['default_currency'] && isset($rates[(int) $u['default_currency']])) ? (int) $u['default_currency'] : $default;
+    if ($cust === null || $usdId === null || $rates[$usdId]['rate'] <= 0 || $rates[$cust]['rate'] <= 0) return null;
+    return round((float) $usd * $rates[$cust]['rate'] / $rates[$usdId]['rate'], 2);
 }
 
 /** Unpaid "Add Funds" invoice for the deposit; addPayment() then settles it. */

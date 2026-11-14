@@ -104,11 +104,19 @@ function payernex_sync_widget($settings, $site)
         $base = (string) parse_url($site, PHP_URL_PATH);
         $widget = str_replace(array('__PNX_BASE__', '__PNX_HIDE__'), array(htmlspecialchars(rtrim($base, '/'), ENT_QUOTES), $hide), $widget);
         $block = '{* ' . $tag . ' *}' . "\n" . $widget . "\n" . '{* /PAYERNEX-QUICKPAY *}' . "\n";
-        // Top of the Add Funds card in the stock DHRU template.
-        $anchor = 'border col-lg-5 p-4 rounded m-auto">';
-        $pos = strpos($clean, $anchor);
-        if ($pos === false) { $result[$theme] = 'no_anchor'; continue; }
-        $at = $pos + strlen($anchor);
+        // Where the widget goes, first match wins: the top of the Add Funds card
+        // in the stock template, else just before the deposit form (the form is
+        // wrapped in {if $disable} in newer DHRU versions).
+        $at = false;
+        foreach (array(
+            array('border col-lg-5 p-4 rounded m-auto">', 'after'),
+            array('{if $disable}', 'before'),
+            array('<form method="post" action="" class="transactionform">', 'before'),
+        ) as $a) {
+            $pos = strpos($clean, $a[0]);
+            if ($pos !== false) { $at = $a[1] === 'after' ? $pos + strlen($a[0]) : $pos; break; }
+        }
+        if ($at === false) { $result[$theme] = 'no_anchor'; continue; }
         $new = substr($clean, 0, $at) . "\n" . $block . substr($clean, $at);   // $block ends with "\n"
         if (@file_put_contents($tplFile, $new) !== false) { $result[$theme] = 'injected'; $changed = true; }
         else { $result[$theme] = 'not_writable'; }

@@ -1,7 +1,7 @@
 <?php
 /*
  * ==========================================================
- * PAYERNEX - DHRU FUSION PAYMENT GATEWAY MODULE  (v2.0.0)
+ * PAYERNEX - DHRU FUSION PAYMENT GATEWAY MODULE  (v2.0.1)
  *
  * Author: Umair Abubakkar
  * URL: https://github.com/umairabubakkar
